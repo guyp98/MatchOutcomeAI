@@ -130,5 +130,5 @@ class Scraper():
 
     def output_json_dataset(self):
         
-        with open(f"./data/raw_datasets/epl/{self.year}_season.json", "w+") as file:
+        with open(path_to_raw_data + f"{self.year}_season.json", "w+") as file:
             file.write(json.dumps(self.matchdict).replace('null', '0'))

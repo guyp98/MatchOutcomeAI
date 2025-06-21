@@ -5,6 +5,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.preprocessing import LabelEncoder
+from global_def import *
 
 def warn(*args, **kwargs):
     pass
@@ -14,7 +15,7 @@ warnings.warn = warn
 scaling_factor = 2
 
 def get_teams_from_season(season):
-    data = pd.read_csv("./data/csv_datasets/epl/all_seasons.csv")
+    data = pd.read_csv(all_data_path)
     season_data = data[data['season'] == season]
     home_teams = season_data['home_team'].unique()
     away_teams = season_data['away_team'].unique()
@@ -22,9 +23,9 @@ def get_teams_from_season(season):
 
     return unique_teams
 
-def load_and_preprocess_data():
+def load_and_preprocess_data(file_path = all_data_path):
 
-    data = pd.read_csv("./data/csv_datasets/epl/all_seasons.csv")
+    data = pd.read_csv(file_path)
 
     le_home = LabelEncoder()
     le_away = LabelEncoder()
@@ -181,3 +182,78 @@ def output_previous_prediction():
 
     except FileNotFoundError:
         print("No previous prediction found.")
+
+def simulate_betting(
+    initial_bankroll: float = 100.0,
+    scaling_factor: int = 2
+):
+    # —————————————————————————————
+    # 1) Train + evaluate on your train_seasons.csv
+    # —————————————————————————————
+    data_train, le_home, le_away, X_all, y_all = load_and_preprocess_data(
+        path_to_csv_data + "train_seasons.csv"
+    )
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_all, y_all, test_size=0.2, random_state=42
+    )
+    clf = train_model(X_train, y_train)
+    evaluate_model(clf, X_all, y_all, X_test, y_test)
+
+    bankroll = initial_bankroll
+    history  = []
+
+    # ——————————————————————————————————————————
+    # 2) Load your last‐season file and sanity‐check it
+    # ——————————————————————————————————————————
+    data_season, le_home, le_away, X_season, y_season = load_and_preprocess_data(
+        path_to_csv_data + "2022_season.csv"   # ← replace with variable or param!
+    )
+    # ensure that all rows in this file truly belong to one season
+    seasons = data_season['season']
+    if not (seasons == seasons.iloc[0]).all():
+        raise Exception("not all years are the same in season csv")
+    season_year = str(seasons.iloc[0])
+
+    # ——————————————————————————————————————————
+    # 3) Step through each match in chronological order
+    # ——————————————————————————————————————————
+    # tie features & original rows together to sort by game_week
+    df_season = data_season.copy()
+    df_season['idx'] = df_season.index
+    df_season.sort_values(by='game_week', inplace=True)
+
+    for _, match in df_season.iterrows():
+        idx = match['idx']
+        x_row = X_season.loc[[idx]]
+
+        # model probabilities for [-1 (away), 0 (draw), 1 (home)]
+        probs = clf.predict_proba(x_row)[0]
+        odds  = 1.0 / probs                 # “fair” odds
+        b     = odds - 1
+
+        # Kelly fractions for each outcome
+        kelly = (b * probs - (1 - probs)) / b
+        kelly = np.clip(kelly, a_min=0, a_max=None)
+
+        # pick the outcome with the highest positive edge
+        best_i = np.argmax(kelly)
+        f_star = kelly[best_i]
+        if f_star <= 0:
+            # no positive‐edge bet → skip
+            history.append(bankroll)
+            continue
+
+        bet = bankroll * f_star
+        chosen = clf.classes_[best_i]
+        actual = match['result']   # your encoding: 1=home, 0=draw, -1=away
+
+        # settle bet
+        if actual == chosen:
+            bankroll += bet * b[best_i]
+        else:
+            bankroll -= bet
+
+        history.append(bankroll)
+
+    return bankroll, history
+    

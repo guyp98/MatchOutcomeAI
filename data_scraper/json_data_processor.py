@@ -1,6 +1,7 @@
 import ujson as json
 import csv
 import os
+from global_def import *
 
 columns = [
         'fixture_id',
@@ -75,7 +76,7 @@ stats = [
 
 def load_raw_dataset(file_name):
 
-    with open(f"./data/raw_datasets/epl/{file_name}.json", "r") as f:
+    with open(path_to_raw_data + f"{file_name}.json", "r") as f:
         
         data = json.load(f)
 
@@ -105,7 +106,7 @@ def output_dataset(file_name, file_data):
 
 def output_data():
 
-    files = os.listdir("./data/raw_datasets/epl")
+    files = os.listdir(path_to_raw_data)
 
     for file in files:
 
