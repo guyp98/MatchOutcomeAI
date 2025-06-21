@@ -1,6 +1,6 @@
 import requests
 import ujson as json
-
+from  global_def import *
 class Scraper():
 
     def __init__(self, year):
