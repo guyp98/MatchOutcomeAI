@@ -185,11 +185,11 @@ def output_previous_prediction():
 
 def simulate_betting(
     initial_bankroll: float = 100.0,
-    scaling_factor: int = 2
+    scaling_factor: int = 2,
+    random_edge_scale: float = 0.05,   # ≈±5% random edge
+    random_seed: int = None
 ):
-    # —————————————————————————————
-    # 1) Train + evaluate on your train_seasons.csv
-    # —————————————————————————————
+    # 1) Train & evaluate
     data_train, le_home, le_away, X_all, y_all = load_and_preprocess_data(
         path_to_csv_data + "train_seasons.csv"
     )
@@ -202,22 +202,19 @@ def simulate_betting(
     bankroll = initial_bankroll
     history  = []
 
-    # ——————————————————————————————————————————
-    # 2) Load your last‐season file and sanity‐check it
-    # ——————————————————————————————————————————
+    # Optionally seed for reproducibility
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    # 2) Load last‐season data
     data_season, le_home, le_away, X_season, y_season = load_and_preprocess_data(
-        path_to_csv_data + "2022_season.csv"   # ← replace with variable or param!
+        path_to_csv_data + "2022_season.csv"
     )
-    # ensure that all rows in this file truly belong to one season
     seasons = data_season['season']
     if not (seasons == seasons.iloc[0]).all():
         raise Exception("not all years are the same in season csv")
-    season_year = str(seasons.iloc[0])
 
-    # ——————————————————————————————————————————
-    # 3) Step through each match in chronological order
-    # ——————————————————————————————————————————
-    # tie features & original rows together to sort by game_week
+    # 3) Iterate in game_week order
     df_season = data_season.copy()
     df_season['idx'] = df_season.index
     df_season.sort_values(by='game_week', inplace=True)
@@ -225,29 +222,30 @@ def simulate_betting(
     for _, match in df_season.iterrows():
         idx = match['idx']
         x_row = X_season.loc[[idx]]
+        probs = clf.predict_proba(x_row)[0]      # [P(away), P(draw), P(home)]
 
-        # model probabilities for [-1 (away), 0 (draw), 1 (home)]
-        probs = clf.predict_proba(x_row)[0]
-        odds  = 1.0 / probs                 # “fair” odds
-        b     = odds - 1
+        # ——— Inject small random mispricing ———
+        # margin ~ Normal(1.0, random_edge_scale)
+        margins = np.random.normal(loc=1.0, scale=random_edge_scale, size=probs.shape)
+        odds   = (1.0 / probs) * margins        # slight over/under pricing
+        b      = odds - 1
 
-        # Kelly fractions for each outcome
+        # Kelly fractions
         kelly = (b * probs - (1 - probs)) / b
         kelly = np.clip(kelly, a_min=0, a_max=None)
 
-        # pick the outcome with the highest positive edge
+        # pick best positive‐edge bet
         best_i = np.argmax(kelly)
         f_star = kelly[best_i]
         if f_star <= 0:
-            # no positive‐edge bet → skip
             history.append(bankroll)
             continue
 
         bet = bankroll * f_star
         chosen = clf.classes_[best_i]
-        actual = match['result']   # your encoding: 1=home, 0=draw, -1=away
+        actual = match['result']   # 1=home, 0=draw, -1=away
 
-        # settle bet
+        # settle
         if actual == chosen:
             bankroll += bet * b[best_i]
         else:
